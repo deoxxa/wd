@@ -45,8 +45,10 @@ display a message at the bottom of your window._
 
 set_message(
   "the document object is a `" +
-    get_node_type(document) +
-    "` node! your lucky number is: " +
+    document.type +
+    "` node with " +
+    document.children.length +
+    " children! your lucky number is: " +
     Math.round(Math.random() * 1000)
 );
 ```

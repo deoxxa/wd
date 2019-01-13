@@ -10,6 +10,9 @@
 
 #include "buf.h"
 #include "draw.h"
+#include "vm_node.h"
+#include "wd_node.h"
+#include "wd_node_meta.h"
 
 #define WD_VERSION "1.0.0"
 #define WS " \t\r\n"
@@ -53,16 +56,9 @@ struct render_s {
   int strong, emph, code, link;
 };
 
-struct node_meta_s {
-  int ready, x1, y1, x2, y2;
-};
-
-struct node_meta_s *node_meta_get(cmark_node *node);
-void node_meta_clear_all(cmark_node *node);
 void render_node_block(cmark_node *node, struct render_s *r);
 void render_node_inline(cmark_node *node, struct render_s *r);
 void render_node_inline_text(const char *word, struct render_s *r);
-void wd_node_free(cmark_node *node);
 void wd_open_url(struct wd_s *s, const char *url);
 void wd_open_url_http(struct wd_s *s, const char *url);
 void wd_open_url_file(struct wd_s *s, const char *url);
@@ -74,43 +70,15 @@ void wd_exec(struct wd_s *s);
 void wd_render(struct wd_s *s);
 int main(int argc, char **argv);
 
-struct node_meta_s *node_meta_get(cmark_node *node) {
-  struct node_meta_s *meta;
-
-  if ((meta = cmark_node_get_user_data(node)) == NULL) {
-    meta = malloc(sizeof(struct node_meta_s));
-    memset(meta, 0, sizeof(struct node_meta_s));
-    cmark_node_set_user_data(node, meta);
-  }
-
-  return meta;
-}
-
-void node_meta_clear_all(cmark_node *node) {
-  cmark_node *child;
-  struct node_meta_s *meta;
-
-  if ((meta = cmark_node_get_user_data(node)) != NULL) {
-    free(meta);
-    meta = NULL;
-    cmark_node_set_user_data(node, NULL);
-  }
-
-  for (child = cmark_node_first_child(node); child != NULL;
-       child = cmark_node_next(child)) {
-    node_meta_clear_all(child);
-  }
-}
-
 void render_node_block(cmark_node *node, struct render_s *r) {
-  struct node_meta_s *meta;
+  struct wd_node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
   char buf[100];
   int len, b, i;
   const char *line;
 
-  if ((meta = node_meta_get(node)) == NULL) {
+  if ((meta = wd_node_meta_get(node)) == NULL) {
     return;
   }
 
@@ -337,13 +305,13 @@ void render_node_block(cmark_node *node, struct render_s *r) {
 }
 
 void render_node_inline(cmark_node *node, struct render_s *r) {
-  struct node_meta_s *meta;
+  struct wd_node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
   char buf[100];
   int b;
 
-  if ((meta = node_meta_get(node)) == NULL) {
+  if ((meta = wd_node_meta_get(node)) == NULL) {
     return;
   }
 
@@ -547,15 +515,6 @@ void render_node_inline_text(const char *word, struct render_s *r) {
   }
 }
 
-void wd_node_free(cmark_node *node) {
-  if (node == NULL) {
-    return;
-  }
-
-  node_meta_clear_all(node);
-  cmark_node_free(node);
-}
-
 void wd_open_url(struct wd_s *s, const char *url) {
   if (strncmp(url, "http://", 7) == 0) {
     wd_open_url_http(s, url);
@@ -711,7 +670,7 @@ void wd_handle_ev(struct wd_s *s, struct tb_event *ev) {
 void wd_handle_ev_always(struct wd_s *s, struct tb_event *ev) {
   if (ev->type == TB_EVENT_RESIZE) {
     if (s->current_doc != NULL) {
-      node_meta_clear_all(s->current_doc);
+      wd_node_meta_clear_all(s->current_doc);
     }
 
     wd_render(s);
@@ -743,13 +702,13 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
       s->current_scroll = MAX(s->current_scroll - 1, 0);
       break;
     case TB_KEY_ARROW_DOWN:
-      s->current_scroll = MIN(s->current_scroll + 1, node_meta_get(s->current_doc)->y2 - (tb_height() - 3));
+      s->current_scroll = MIN(s->current_scroll + 1, wd_node_meta_get(s->current_doc)->y2 - (tb_height() - 2));
       break;
     case TB_KEY_PGUP:
-      s->current_scroll = MAX(s->current_scroll - (tb_height() - 3), 0);
+      s->current_scroll = MAX(s->current_scroll - (tb_height() - 2), 0);
       break;
     case TB_KEY_PGDN:
-      s->current_scroll = MIN(s->current_scroll + (tb_height() - 3), node_meta_get(s->current_doc)->y2 - (tb_height() - 3));
+      s->current_scroll = MIN(s->current_scroll + (tb_height() - 2), wd_node_meta_get(s->current_doc)->y2 - (tb_height() - 2));
       break;
   }
 }
@@ -861,13 +820,6 @@ duk_ret_t wd_vm_set_message(duk_context *ctx) {
   return DUK_ERR_NONE;
 }
 
-duk_ret_t wd_vm_get_node_type(duk_context *ctx) {
-  cmark_node *node;
-  node = duk_get_pointer_default(ctx, -1, NULL);
-  duk_push_string(ctx, cmark_node_get_type_string(node));
-  return 1;
-}
-
 void wd_exec(struct wd_s *s) {
   cmark_event_type ev;
   cmark_iter *iter;
@@ -884,14 +836,15 @@ void wd_exec(struct wd_s *s) {
   duk_push_pointer(vm, s);
   duk_put_global_string(vm, "window");
 
+  wd_vm__Node__define(vm);
+
+  duk_get_global_string(vm, "Node");
   duk_push_pointer(vm, s->current_doc);
+  duk_new(vm, 1);
   duk_put_global_string(vm, "document");
 
   duk_push_c_function(vm, wd_vm_set_message, 1);
   duk_put_global_string(vm, "set_message");
-
-  duk_push_c_function(vm, wd_vm_get_node_type, 1);
-  duk_put_global_string(vm, "get_node_type");
 
   iter = cmark_iter_new(s->current_doc);
 
