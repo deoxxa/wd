@@ -93,6 +93,7 @@ void node_meta_clear_all(cmark_node *node) {
   if ((meta = cmark_node_get_user_data(node)) != NULL) {
     free(meta);
     meta = NULL;
+    cmark_node_set_user_data(node, NULL);
   }
 
   for (child = cmark_node_first_child(node); child != NULL;
@@ -600,10 +601,16 @@ void wd_open_url_http(struct wd_s *s, const char *url) {
 
   strncpy(s->current_url, url, sizeof(s->current_url));
 
-  free(s->current_src);
+  if (s->current_src != NULL) {
+    buf_free(s->current_src);
+    s->current_src = NULL;
+  }
   s->current_src = buf;
 
-  wd_node_free(s->current_doc);
+  if (s->current_doc != NULL) {
+    wd_node_free(s->current_doc);
+    s->current_doc = NULL;
+  }
   s->current_doc = doc;
 
   if (s->current_vm != NULL) {
@@ -656,10 +663,16 @@ void wd_open_url_file(struct wd_s *s, const char *url) {
 
   strncpy(s->current_url, url, sizeof(s->current_url));
 
-  free(s->current_src);
+  if (s->current_src != NULL) {
+    buf_free(s->current_src);
+    s->current_src = NULL;
+  }
   s->current_src = buf;
 
-  wd_node_free(s->current_doc);
+  if (s->current_doc != NULL) {
+    wd_node_free(s->current_doc);
+    s->current_doc = NULL;
+  }
   s->current_doc = doc;
 
   if (s->current_vm != NULL) {
@@ -670,12 +683,15 @@ void wd_open_url_file(struct wd_s *s, const char *url) {
 cleanup:
   if (fd != NULL) {
     fclose(fd);
+    fd = NULL;
   }
   if (buf != NULL && buf != s->current_src) {
     buf_free(buf);
+    buf = NULL;
   }
   if (doc != NULL && doc != s->current_doc) {
     wd_node_free(doc);
+    doc = NULL;
   }
 }
 
@@ -907,8 +923,14 @@ void wd_exec(struct wd_s *s) {
   s->current_vm = vm;
 
 exit:
+  if (iter != NULL) {
+    cmark_iter_free(iter);
+    iter = NULL;
+  }
+
   if (vm != NULL && vm != s->current_vm) {
     duk_destroy_heap(vm);
+    vm = NULL;
   }
 }
 
@@ -937,6 +959,21 @@ int main(int argc, char **argv) {
   }
 
   tb_shutdown();
+
+  if (s.current_src != NULL) {
+    buf_free(s.current_src);
+    s.current_src = NULL;
+  }
+
+  if (s.current_doc != NULL) {
+    wd_node_free(s.current_doc);
+    s.current_doc = NULL;
+  }
+
+  if (s.current_vm != NULL) {
+    duk_destroy_heap(s.current_vm);
+    s.current_vm = NULL;
+  }
 
   return 0;
 }
