@@ -740,14 +740,10 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
       s->quit = 1;
       break;
     case TB_KEY_ARROW_UP:
-      if (s->current_scroll > 0) {
-        s->current_scroll--;
-      }
+      s->current_scroll = MAX(s->current_scroll - 1, 0);
       break;
     case TB_KEY_ARROW_DOWN:
-      if (s->current_scroll < node_meta_get(s->current_doc)->y2 - (tb_height() - 3)) {
-        s->current_scroll++;
-      }
+      s->current_scroll = MIN(s->current_scroll + 1, node_meta_get(s->current_doc)->y2 - (tb_height() - 3));
       break;
     case TB_KEY_PGUP:
       s->current_scroll = MAX(s->current_scroll - (tb_height() - 3), 0);
