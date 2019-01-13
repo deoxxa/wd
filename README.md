@@ -55,7 +55,6 @@ set_message(
 
 I've got quite a bit planned that I'm yet to implement. This list is not in any particular order.
 
-- Scrolling (rather important)
 - Media file support using image tags, behaving like elinks
 - Self-contained writable "application" documents
 - More JavaScript functionality

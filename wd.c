@@ -9,9 +9,14 @@
 #include <termbox.h>
 
 #include "buf.h"
+#include "draw.h"
 
 #define WD_VERSION "1.0.0"
 #define WS " \t\r\n"
+
+// duktape.h defines these as well
+// #define MIN(a, b) ((a) < (b) ? (a) : (b))
+// #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 enum wd_mode_e { WD_MODE_NORMAL, WD_MODE_URL };
 
@@ -28,6 +33,7 @@ struct wd_s {
   duk_context *current_vm;
   enum wd_error_e current_err;
   char current_message[1000];
+  int current_scroll;
 
   // url input
   char edit_url[10000];
@@ -38,23 +44,24 @@ struct wd_s {
   int quit;
 };
 
-struct renderer_s {
+struct render_s {
+  int top;
+  int x1, y1, x2, y2;
   int x, y;
   int start, space;
   int list;
   int strong, emph, code, link;
 };
 
-void draw_line_special(int x, int y, int w, uint16_t fg, uint16_t bg);
-void draw_text_special(int x, int y, const char *str, uint16_t fg, uint16_t bg);
-void draw_text_specialn(int x, int y, const char *str, size_t len, uint16_t fg,
-                        uint16_t bg);
-void draw_text(int x, int y, const char *str);
-void draw_textn(int x, int y, const char *str, size_t len);
-void render_url_input(const char *url, int p);
-void render_node_block(cmark_node *node, struct renderer_s *r);
-void render_node_inline(cmark_node *node, struct renderer_s *r);
-void render_node_inline_text(const char *word, struct renderer_s *r);
+struct node_meta_s {
+  int ready, x1, y1, x2, y2;
+};
+
+struct node_meta_s *node_meta_get(cmark_node *node);
+void node_meta_clear_all(cmark_node *node);
+void render_node_block(cmark_node *node, struct render_s *r);
+void render_node_inline(cmark_node *node, struct render_s *r);
+void render_node_inline_text(const char *word, struct render_s *r);
 void wd_node_free(cmark_node *node);
 void wd_open_url(struct wd_s *s, const char *url);
 void wd_open_url_http(struct wd_s *s, const char *url);
@@ -67,60 +74,73 @@ void wd_exec(struct wd_s *s);
 void wd_render(struct wd_s *s);
 int main(int argc, char **argv);
 
-void draw_line_special(int x, int y, int w, uint16_t fg, uint16_t bg) {
-  int i;
+struct node_meta_s *node_meta_get(cmark_node *node) {
+  struct node_meta_s *meta;
 
-  for (i = 0; i < w; i++) {
-    tb_change_cell(x + i, y, ' ', fg, bg);
+  if ((meta = cmark_node_get_user_data(node)) == NULL) {
+    meta = malloc(sizeof(struct node_meta_s));
+    memset(meta, 0, sizeof(struct node_meta_s));
+    cmark_node_set_user_data(node, meta);
+  }
+
+  return meta;
+}
+
+void node_meta_clear_all(cmark_node *node) {
+  cmark_node *child;
+  struct node_meta_s *meta;
+
+  if ((meta = cmark_node_get_user_data(node)) != NULL) {
+    free(meta);
+    meta = NULL;
+  }
+
+  for (child = cmark_node_first_child(node); child != NULL;
+       child = cmark_node_next(child)) {
+    node_meta_clear_all(child);
   }
 }
 
-void draw_text_specialn(int x, int y, const char *str, size_t len, uint16_t fg,
-                        uint16_t bg) {
-  char c;
-  int i, w;
-
-  for (i = 0, w = 0; i < len; i++) {
-    c = str[i];
-
-    if (c == '\n') {
-      y++;
-      w = 0;
-    } else {
-      tb_change_cell(x + w++, y, c, fg, bg);
-    }
-  }
-}
-
-void draw_text_special(int x, int y, const char *str, uint16_t fg,
-                       uint16_t bg) {
-  draw_text_specialn(x, y, str, strlen(str), fg, bg);
-}
-
-void draw_textn(int x, int y, const char *str, size_t len) {
-  draw_text_specialn(x, y, str, len, TB_DEFAULT, TB_DEFAULT);
-}
-
-void draw_text(int x, int y, const char *str) {
-  draw_textn(x, y, str, strlen(str));
-}
-
-void render_node_block(cmark_node *node, struct renderer_s *r) {
+void render_node_block(cmark_node *node, struct render_s *r) {
+  struct node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
   char buf[100];
   int len, b, i;
   const char *line;
 
+  if ((meta = node_meta_get(node)) == NULL) {
+    return;
+  }
+
+  if (meta->ready && meta->y1 > r->y2) {
+    return;
+  }
+
   switch (t = cmark_node_get_type(node)) {
     case CMARK_NODE_DOCUMENT: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       r->start = 1;
       r->space = 0;
+
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         render_node_block(child, r);
       }
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
+      r->x = 0;
       r->y += 1;
+
       break;
     }
     case CMARK_NODE_HEADING: {
@@ -130,73 +150,140 @@ void render_node_block(cmark_node *node, struct renderer_s *r) {
         buf[i + 2] = 0;
       }
 
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       r->start = 0;
       r->space = 0;
+
       b = r->strong;
-      render_node_inline_text(buf, r);
       r->strong = 1;
+
+      render_node_inline_text(buf, r);
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         render_node_inline(child, r);
       }
+
       r->strong = b;
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
+      r->x = 0;
+      r->y += 1;
       if (!r->list) {
         r->y += 1;
       }
-      r->y += 1;
-      r->x = 0;
+
       break;
     }
     case CMARK_NODE_CODE_BLOCK: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       r->start = 1;
       r->space = 0;
+
       snprintf(buf, sizeof(buf), "```%s", cmark_node_get_fence_info(node));
-      draw_text(0, r->y, buf);
+      draw_text(0, r->y - r->y1, buf);
       r->y += 1;
+
       line = cmark_node_get_literal(node);
       while (*line) {
         len = strcspn(line, "\n");
-        draw_textn(0, r->y, line, len);
+        draw_textn(0, r->y - r->y1, line, len);
         r->y += 1;
         line += len + 1;
       }
-      draw_text(0, r->y, "```");
+
+      draw_text(0, r->y - r->y1, "```");
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
+      r->x = 0;
+      r->y += 1;
       if (!r->list) {
         r->y += 1;
       }
-      r->y += 1;
-      r->x = 0;
+
       break;
     }
     case CMARK_NODE_PARAGRAPH: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       r->start = 1;
       r->space = 0;
+
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         render_node_inline(child, r);
       }
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
+      r->x = 0;
+      r->y += 1;
       if (!r->list) {
         r->y += 1;
       }
-      r->y += 1;
-      r->x = 0;
+
       break;
     }
     case CMARK_NODE_LIST: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       b = r->list;
+
       r->start = 1;
       r->space = 0;
+
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         r->list++;
         render_node_block(child, r);
       }
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       r->list = b;
+
       r->x = 0;
       r->y += 1;
+
       break;
     }
     case CMARK_NODE_ITEM: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         if (cmark_node_get_list_type(cmark_node_parent(node)) ==
@@ -209,29 +296,67 @@ void render_node_block(cmark_node *node, struct renderer_s *r) {
 
         render_node_block(child, r);
       }
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     default: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       r->start = 1;
       r->space = 0;
+
       len = snprintf(buf, sizeof(buf), "unhandled block `%s' node",
                      cmark_node_get_type_string(node));
-      draw_text(r->x, r->y, buf);
-      r->y += 2;
+      draw_text(r->x, r->y - r->y1, buf);
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       r->x = 0;
+      r->y += 1;
+      if (!r->list) {
+        r->y += 1;
+      }
+
       break;
     }
   }
 }
 
-void render_node_inline(cmark_node *node, struct renderer_s *r) {
+void render_node_inline(cmark_node *node, struct render_s *r) {
+  struct node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
   char buf[100];
-  int len, b;
+  int b;
+
+  if ((meta = node_meta_get(node)) == NULL) {
+    return;
+  }
+
+  if (meta->ready && meta->y1 > r->y2) {
+    return;
+  }
 
   switch (t = cmark_node_get_type(node)) {
     case CMARK_NODE_EMPH: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       b = r->emph;
       r->emph = 1;
       for (child = cmark_node_first_child(node); child != NULL;
@@ -240,9 +365,20 @@ void render_node_inline(cmark_node *node, struct renderer_s *r) {
       }
       r->emph = b;
 
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     case CMARK_NODE_STRONG: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       b = r->strong;
       r->strong = 1;
       for (child = cmark_node_first_child(node); child != NULL;
@@ -251,22 +387,55 @@ void render_node_inline(cmark_node *node, struct renderer_s *r) {
       }
       r->strong = b;
 
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     case CMARK_NODE_CODE: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       b = r->code;
       r->code = 1;
       render_node_inline_text(cmark_node_get_literal(node), r);
       r->code = b;
 
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     case CMARK_NODE_TEXT: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       render_node_inline_text(cmark_node_get_literal(node), r);
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
 
       break;
     }
     case CMARK_NODE_LINK: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       b = r->link;
       r->link = 1;
       for (child = cmark_node_first_child(node); child != NULL;
@@ -275,27 +444,56 @@ void render_node_inline(cmark_node *node, struct renderer_s *r) {
       }
       r->link = 0;
 
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     case CMARK_NODE_SOFTBREAK: {
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
       if (r->start) {
         r->start = 0;
       } else {
         render_node_inline_text(" ", r);
       }
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
     default: {
-      len = snprintf(buf, sizeof(buf), "unhandled inline `%s' node",
-                     cmark_node_get_type_string(node));
-      draw_text(r->x, r->y, buf);
-      r->x += len;
+      if (!meta->ready) {
+        meta->x1 = r->x;
+        meta->y1 = r->y;
+      }
+
+      snprintf(buf, sizeof(buf), "unhandled inline `%s' node",
+               cmark_node_get_type_string(node));
+      render_node_inline_text(buf, r);
+
+      if (!meta->ready) {
+        meta->x2 = r->x;
+        meta->y2 = r->y;
+        meta->ready = 1;
+      }
+
       break;
     }
   }
 }
 
-void render_node_inline_text(const char *word, struct renderer_s *r) {
+void render_node_inline_text(const char *word, struct render_s *r) {
   int len, fg, bg;
 
   fg = TB_DEFAULT;
@@ -321,7 +519,7 @@ void render_node_inline_text(const char *word, struct renderer_s *r) {
       if (r->start) {
         r->start = 0;
       } else {
-        draw_text_special(r->x, r->y, " ", fg, bg);
+        draw_text_special(r->x, r->y - r->y1, " ", fg, bg);
         r->x += 1;
       }
 
@@ -340,7 +538,7 @@ void render_node_inline_text(const char *word, struct renderer_s *r) {
       continue;
     }
 
-    draw_text_specialn(r->x, r->y, word, len, fg, bg);
+    draw_text_specialn(r->x, r->y - r->y1, word, len, fg, bg);
 
     r->x += len;
 
@@ -353,6 +551,7 @@ void wd_node_free(cmark_node *node) {
     return;
   }
 
+  node_meta_clear_all(node);
   cmark_node_free(node);
 }
 
@@ -495,6 +694,10 @@ void wd_handle_ev(struct wd_s *s, struct tb_event *ev) {
 
 void wd_handle_ev_always(struct wd_s *s, struct tb_event *ev) {
   if (ev->type == TB_EVENT_RESIZE) {
+    if (s->current_doc != NULL) {
+      node_meta_clear_all(s->current_doc);
+    }
+
     wd_render(s);
   }
 }
@@ -519,6 +722,22 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
       break;
     case TB_KEY_CTRL_X:
       s->quit = 1;
+      break;
+    case TB_KEY_ARROW_UP:
+      if (s->current_scroll > 0) {
+        s->current_scroll--;
+      }
+      break;
+    case TB_KEY_ARROW_DOWN:
+      if (s->current_scroll < node_meta_get(s->current_doc)->y2 - (tb_height() - 3)) {
+        s->current_scroll++;
+      }
+      break;
+    case TB_KEY_PGUP:
+      s->current_scroll = MAX(s->current_scroll - (tb_height() - 3), 0);
+      break;
+    case TB_KEY_PGDN:
+      s->current_scroll = MIN(s->current_scroll + (tb_height() - 3), node_meta_get(s->current_doc)->y2 - (tb_height() - 3));
       break;
   }
 }
@@ -558,14 +777,24 @@ void wd_handle_ev_mode_url(struct wd_s *s, struct tb_event *ev) {
 
 void wd_render(struct wd_s *s) {
   char buf[10050];
-  struct renderer_s r;
+  struct render_s r;
 
   memset(&r, 0, sizeof(r));
   r.y = 1;
+  r.x1 = 0;
+  r.y1 = s->current_scroll;
+  r.x2 = tb_width();
+  r.y2 = s->current_scroll + tb_height() - 2;
 
   tb_clear();
 
   tb_select_output_mode(TB_OUTPUT_NORMAL);
+
+  if (s->current_doc != NULL) {
+    render_node_block(s->current_doc, &r);
+  } else {
+    draw_text(0, 1, "No document loaded - hit CTRL+O to open a URL");
+  }
 
   if (s->im == WD_MODE_URL) {
     snprintf(buf, sizeof(buf), "URL: %s", s->edit_url);
@@ -574,19 +803,13 @@ void wd_render(struct wd_s *s) {
     tb_change_cell(5 + s->edit_url_cursor, 0, s->edit_url[s->edit_url_cursor],
                    TB_WHITE, TB_BLACK);
   } else if (s->current_src != NULL) {
-    snprintf(buf, sizeof(buf), "URL: %s (%ld bytes)", s->current_url,
-             s->current_src->len);
+    snprintf(buf, sizeof(buf), "URL: %s (%ld bytes; scroll=%d)", s->current_url,
+             s->current_src->len, s->current_scroll);
     draw_line_special(0, 0, tb_width(), TB_WHITE | TB_BOLD, TB_BLUE);
     draw_text_special(0, 0, buf, TB_WHITE | TB_BOLD, TB_BLUE);
   } else {
     draw_line_special(0, 0, tb_width(), TB_WHITE | TB_BOLD, TB_BLUE);
     draw_text_special(0, 0, "URL:", TB_WHITE | TB_BOLD, TB_BLUE);
-  }
-
-  if (s->current_doc != NULL) {
-    render_node_block(s->current_doc, &r);
-  } else {
-    draw_text(0, 1, "No document loaded - hit CTRL+O to open a URL");
   }
 
   if (s->current_err != WD_ERROR_NONE) {
@@ -605,7 +828,7 @@ void wd_render(struct wd_s *s) {
   draw_line_special(0, tb_height() - 1, tb_width(), TB_WHITE | TB_BOLD,
                     TB_BLUE);
   draw_text_special(0, tb_height() - 1,
-                    "^O=Open ^X=Exit ^R=Refresh ^M=Close Message",
+                    "^O=Open ^X=Exit ^R=Refresh ^M=Close Message UP/DOWN/PGUP/PGDN=Scroll",
                     TB_WHITE | TB_BOLD, TB_BLUE);
 
   tb_present();
@@ -632,8 +855,6 @@ duk_ret_t wd_vm_get_node_type(duk_context *ctx) {
   duk_push_string(ctx, cmark_node_get_type_string(node));
   return 1;
 }
-
-duk_ret_t wd_vm_random(duk_context *ctx) { return 0; }
 
 void wd_exec(struct wd_s *s) {
   cmark_event_type ev;
