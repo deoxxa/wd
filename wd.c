@@ -836,6 +836,9 @@ void wd_exec(struct wd_s *s) {
   const char *info, *code;
   duk_context *vm;
 
+  iter = NULL;
+  vm = NULL;
+
   if (s->current_doc == NULL) {
     goto exit;
   }
