@@ -518,9 +518,11 @@ void render_node_inline_text(const char *word, struct render_s *r) {
 void wd_open_url(struct wd_s *s, const char *url) {
   if (strncmp(url, "http://", 7) == 0) {
     wd_open_url_http(s, url);
+    s->current_scroll = 0;
     wd_exec(s);
   } else if (strncmp(url, "file://", 7) == 0) {
     wd_open_url_file(s, url);
+    s->current_scroll = 0;
     wd_exec(s);
   } else {
     s->current_err = WD_ERROR_FAILED_PARSE;
@@ -698,6 +700,12 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
     case TB_KEY_CTRL_X:
       s->quit = 1;
       break;
+    case TB_KEY_HOME:
+      s->current_scroll = 0;
+      break;
+    case TB_KEY_END:
+      s->current_scroll = wd_node_meta_get(s->current_doc)->y2 - (tb_height() - 2);
+      break;
     case TB_KEY_ARROW_UP:
       s->current_scroll = MAX(s->current_scroll - 1, 0);
       break;
@@ -707,6 +715,7 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
     case TB_KEY_PGUP:
       s->current_scroll = MAX(s->current_scroll - (tb_height() - 2), 0);
       break;
+    case TB_KEY_SPACE:
     case TB_KEY_PGDN:
       s->current_scroll = MIN(s->current_scroll + (tb_height() - 2), wd_node_meta_get(s->current_doc)->y2 - (tb_height() - 2));
       break;
@@ -799,7 +808,7 @@ void wd_render(struct wd_s *s) {
   draw_line_special(0, tb_height() - 1, tb_width(), TB_WHITE | TB_BOLD,
                     TB_BLUE);
   draw_text_special(0, tb_height() - 1,
-                    "^O=Open ^X=Exit ^R=Refresh ^M=Close Message UP/DOWN/PGUP/PGDN=Scroll",
+                    "^O=Open ^X=Exit ^R=Refresh ^M=Close Message UP/DOWN/PGUP/PGDN/HOME/END/SPACE=Scroll",
                     TB_WHITE | TB_BOLD, TB_BLUE);
 
   tb_present();
