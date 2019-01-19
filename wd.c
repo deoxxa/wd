@@ -8,12 +8,15 @@
 #include <curl/curl.h>
 #include <duktape.h>
 #include <termbox.h>
+#include <uriparser/Uri.h>
 
 #include "buf.h"
 #include "draw.h"
+#include "darray.h"
 #include "vm_node.h"
 #include "wd_node.h"
 #include "wd_node_meta.h"
+#include "wd_tree.h"
 
 #define WD_VERSION "1.0.0"
 #define WS " \t\r\n"
@@ -24,6 +27,9 @@ extern cmark_node_type CMARK_NODE_TABLE, CMARK_NODE_TABLE_ROW,
 // duktape.h defines these as well
 // #define MIN(a, b) ((a) < (b) ? (a) : (b))
 // #define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+DARRAY_OF(cmark_node*, nodes)
+DARRAY_OF_IMPL(cmark_node*, nodes)
 
 enum wd_mode_e { WD_MODE_NORMAL, WD_MODE_URL };
 
@@ -47,6 +53,7 @@ struct wd_s {
   char current_error_message[1000];
   char current_message[1000];
   int current_scroll;
+  cmark_node *current_node;
 
   // url input
   char edit_url[10000];
@@ -63,11 +70,11 @@ struct render_s {
   int x, y;
   int start, space;
   int list;
-  int strong, emph, code, link;
+  int strong, emph, code, link, active;
 };
 
-void render_node_block(cmark_node *node, struct render_s *r);
-void render_node_inline(cmark_node *node, struct render_s *r);
+void render_node_block(struct wd_s *s, cmark_node *node, struct render_s *r);
+void render_node_inline(struct wd_s *s, cmark_node *node, struct render_s *r);
 void render_node_inline_text(const char *word, struct render_s *r);
 int wd_open(struct wd_s *s, const char *url, struct buf_s *buf);
 int wd_open_url(struct wd_s *s, const char *url);
@@ -81,7 +88,7 @@ void wd_exec(struct wd_s *s);
 void wd_render(struct wd_s *s);
 int main(int argc, char **argv);
 
-void render_node_block(cmark_node *node, struct render_s *r) {
+void render_node_block(struct wd_s *s, cmark_node *node, struct render_s *r) {
   struct wd_node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
@@ -109,7 +116,7 @@ void render_node_block(cmark_node *node, struct render_s *r) {
 
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_block(child, r);
+        render_node_block(s, child, r);
       }
 
       if (!meta->ready) {
@@ -144,7 +151,7 @@ void render_node_block(cmark_node *node, struct render_s *r) {
       render_node_inline_text(buf, r);
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_inline(child, r);
+        render_node_inline(s, child, r);
       }
 
       r->strong = b;
@@ -211,7 +218,7 @@ void render_node_block(cmark_node *node, struct render_s *r) {
 
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_inline(child, r);
+        render_node_inline(s, child, r);
       }
 
       if (!meta->ready) {
@@ -242,7 +249,7 @@ void render_node_block(cmark_node *node, struct render_s *r) {
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
         r->list++;
-        render_node_block(child, r);
+        render_node_block(s, child, r);
       }
 
       if (!meta->ready) {
@@ -274,7 +281,7 @@ void render_node_block(cmark_node *node, struct render_s *r) {
           render_node_inline_text("* ", r);
         }
 
-        render_node_block(child, r);
+        render_node_block(s, child, r);
       }
 
       if (!meta->ready) {
@@ -354,12 +361,12 @@ void render_node_block(cmark_node *node, struct render_s *r) {
   }
 }
 
-void render_node_inline(cmark_node *node, struct render_s *r) {
+void render_node_inline(struct wd_s *s, cmark_node *node, struct render_s *r) {
   struct wd_node_meta_s *meta;
   cmark_node_type t;
   cmark_node *child;
   char buf[100];
-  int b;
+  int b1, b2;
 
   if ((meta = wd_node_meta_get(node)) == NULL) {
     return;
@@ -376,13 +383,13 @@ void render_node_inline(cmark_node *node, struct render_s *r) {
         meta->y1 = r->y;
       }
 
-      b = r->emph;
+      b1 = r->emph;
       r->emph = 1;
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_inline(child, r);
+        render_node_inline(s, child, r);
       }
-      r->emph = b;
+      r->emph = b1;
 
       if (!meta->ready) {
         meta->x2 = r->x;
@@ -398,13 +405,13 @@ void render_node_inline(cmark_node *node, struct render_s *r) {
         meta->y1 = r->y;
       }
 
-      b = r->strong;
+      b1 = r->strong;
       r->strong = 1;
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_inline(child, r);
+        render_node_inline(s, child, r);
       }
-      r->strong = b;
+      r->strong = b1;
 
       if (!meta->ready) {
         meta->x2 = r->x;
@@ -420,10 +427,10 @@ void render_node_inline(cmark_node *node, struct render_s *r) {
         meta->y1 = r->y;
       }
 
-      b = r->code;
+      b1 = r->code;
       r->code = 1;
       render_node_inline_text(cmark_node_get_literal(node), r);
-      r->code = b;
+      r->code = b1;
 
       if (!meta->ready) {
         meta->x2 = r->x;
@@ -455,13 +462,18 @@ void render_node_inline(cmark_node *node, struct render_s *r) {
         meta->y1 = r->y;
       }
 
-      b = r->link;
+      b1 = r->link;
+      b2 = r->active;
       r->link = 1;
+      if (node == s->current_node) {
+        r->active = 1;
+      }
       for (child = cmark_node_first_child(node); child != NULL;
            child = cmark_node_next(child)) {
-        render_node_inline(child, r);
+        render_node_inline(s, child, r);
       }
-      r->link = 0;
+      r->link = b1;
+      r->active = b2;
 
       if (!meta->ready) {
         meta->x2 = r->x;
@@ -519,8 +531,13 @@ void render_node_inline_text(const char *word, struct render_s *r) {
   bg = TB_DEFAULT;
 
   if (r->link) {
-    fg |= TB_BLUE;
-    fg |= TB_UNDERLINE;
+    if (r->active) {
+      fg |= TB_RED;
+      fg |= TB_UNDERLINE;
+    } else {
+      fg |= TB_BLUE;
+      fg |= TB_UNDERLINE;
+    }
   } else if (r->emph) {
     fg |= TB_CYAN;
   }
@@ -629,7 +646,7 @@ cleanup:
 
   if (rc == 0) {
     s->current_scroll = 0;
-    s->current_link = 0;
+    s->current_node = 0;
 
     wd_exec(s);
   }
@@ -639,23 +656,94 @@ cleanup:
 
 int wd_open_url(struct wd_s *s, const char *url) {
   int rc;
+  UriUriA uri_frag, uri_base, uri_abs;
+  UriParserStateA uri_state;
+  char target[10000], scheme[100];
 
   rc = 0;
+  memset(&uri_frag, 0, sizeof(uri_frag));
+  memset(&uri_base, 0, sizeof(uri_base));
+  memset(&uri_abs, 0, sizeof(uri_abs));
+  memset(&uri_state, 0, sizeof(uri_state));
+  memset(target, 0, sizeof(target));
+  memset(scheme, 0, sizeof(scheme));
 
-  if (strncmp(url, "http://", 7) == 0) {
-    rc = wd_open_url_http(s, url);
-  } else if (strncmp(url, "https://", 8) == 0) {
-    rc = wd_open_url_http(s, url);
-  } else if (strncmp(url, "file://", 7) == 0) {
-    rc = wd_open_url_file(s, url);
+  if (strlen(s->current_url) > 0) {
+    uri_state.uri = &uri_base;
+    if (uriParseUriA(&uri_state, s->current_url) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't parse base URL");
+      rc = 1;
+      goto cleanup;
+    }
+
+    uri_state.uri = &uri_frag;
+    if (uriParseUriA(&uri_state, url) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't parse target URL fragment");
+      rc = 1;
+      goto cleanup;
+    }
+
+    if (uriAddBaseUriA(&uri_abs, &uri_frag, &uri_base) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't resolve absolute target");
+      rc = 1;
+      goto cleanup;
+    }
+
+    if (uriToStringA(target, &uri_abs, sizeof(target) - 1, NULL) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't format target url");
+      rc = 1;
+      goto cleanup;
+    }
+  } else {
+    uri_state.uri = &uri_abs;
+    if (uriParseUriA(&uri_state, url) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't parse target URL fragment");
+      rc = 1;
+      goto cleanup;
+    }
+
+    if (uriToStringA(target, &uri_abs, sizeof(target) - 1, NULL) != URI_SUCCESS) {
+      s->current_error = WD_ERROR_FAILED_PARSE;
+      snprintf(s->current_error_message, sizeof(s->current_error_message), "couldn't format target url");
+      rc = 1;
+      goto cleanup;
+    }
+  }
+
+  if (uri_abs.scheme.first != NULL) {
+    memcpy(scheme, uri_abs.scheme.first, MIN(uri_abs.scheme.afterLast - uri_abs.scheme.first, sizeof(scheme) - 1));
+  }
+
+  if (strncmp(scheme, "http", 4) == 0) {
+    if ((rc = wd_open_url_http(s, target)) != 0) {
+      goto cleanup;
+    }
+  } else if (strncmp(scheme, "https", 5) == 0) {
+    if ((rc = wd_open_url_http(s, target)) != 0) {
+      goto cleanup;
+    }
+  } else if (strncmp(scheme, "file", 4) == 0) {
+    if ((rc = wd_open_url_file(s, target)) != 0) {
+      goto cleanup;
+    }
   } else {
     s->current_error = WD_ERROR_FAILED_PARSE;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "unrecognised url scheme; try https://, http://, or file://");
+             "unrecognised url scheme `%s' for %s; try https://, http://, or file://", scheme, target);
 
     rc = 1;
+    goto cleanup;
   }
 
+cleanup:
+  uriFreeUriMembersA(&uri_frag);
+  uriFreeUriMembersA(&uri_base);
+  uriFreeUriMembersA(&uri_abs);
   return rc;
 }
 
@@ -684,7 +772,7 @@ int wd_open_url_http(struct wd_s *s, const char *url) {
   if ((res = curl_easy_perform(ch)) != CURLE_OK) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "failed performing request");
+             "failed performing request for %s", url);
     rc = 1;
     goto cleanup;
   }
@@ -703,17 +791,26 @@ int wd_open_url_file(struct wd_s *s, const char *url) {
   int rc;
   FILE *fd;
   struct buf_s *buf;
-  char b[1024];
+  char b[1024], file[10050];
   size_t nread;
 
   rc = 0;
   fd = NULL;
   buf = buf_new(1024 * 100);
+  memset(file, 0, sizeof(file));
 
-  if ((fd = fopen(&(url[7]), "r")) == NULL) {
+  if (uriUriStringToUnixFilenameA(url, file) != URI_SUCCESS) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "failed opening file");
+             "couldn't get filename from file url: %s", url);
+    rc = 1;
+    goto cleanup;
+  }
+
+  if ((fd = fopen(file, "r")) == NULL) {
+    s->current_error = WD_ERROR_UNKNOWN;
+    snprintf(s->current_error_message, sizeof(s->current_error_message),
+             "failed opening file: %s", file);
     rc = 1;
     goto cleanup;
   }
@@ -726,7 +823,7 @@ int wd_open_url_file(struct wd_s *s, const char *url) {
   if (ferror(fd)) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "failed reading file");
+             "failed reading file: %s", file);
     rc = 1;
     goto cleanup;
   }
@@ -772,7 +869,7 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
         s->loading = 0;
       }
       break;
-    case TB_KEY_CTRL_M:
+    case TB_KEY_ESC:
       memset(s->current_message, 0, sizeof(s->current_message));
       break;
     case TB_KEY_CTRL_O:
@@ -809,6 +906,20 @@ void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev) {
       s->current_scroll =
           MIN(s->current_scroll + (tb_height() - 2),
               wd_node_meta_get(s->current_doc)->y2 - (tb_height() - 2));
+      break;
+    case TB_KEY_ENTER:
+      if (s->current_node != NULL && cmark_node_get_type(s->current_node) == CMARK_NODE_LINK) {
+        wd_open_url(s, cmark_node_get_url(s->current_node));
+      }
+      break;
+  }
+
+  switch (ev->ch) {
+    case '[':
+      s->current_node = wd_tree_find_prev_thing(s->current_doc, s->current_node);
+      break;
+    case ']':
+      s->current_node = wd_tree_find_next_thing(s->current_doc, s->current_node);
       break;
   }
 }
@@ -847,10 +958,16 @@ void wd_handle_ev_mode_url(struct wd_s *s, struct tb_event *ev) {
 }
 
 void wd_render(struct wd_s *s) {
+  int p;
   char buf[10050];
   struct render_s r;
+  struct wd_node_meta_s *m;
 
+  p = 0;
+  memset(buf, 0, sizeof(buf));
   memset(&r, 0, sizeof(r));
+  m = NULL;
+
   r.y = 1;
   r.x1 = 0;
   r.y1 = s->current_scroll;
@@ -862,7 +979,7 @@ void wd_render(struct wd_s *s) {
   tb_select_output_mode(TB_OUTPUT_NORMAL);
 
   if (s->current_doc != NULL) {
-    render_node_block(s->current_doc, &r);
+    render_node_block(s, s->current_doc, &r);
   } else {
     draw_text(0, 1, "No document loaded - hit CTRL+O to open a URL");
   }
@@ -873,14 +990,33 @@ void wd_render(struct wd_s *s) {
     draw_text_special(0, 0, buf, TB_BLACK, TB_WHITE);
     tb_change_cell(5 + s->edit_url_cursor, 0, s->edit_url[s->edit_url_cursor],
                    TB_WHITE, TB_BLACK);
-  } else if (s->current_src != NULL) {
-    snprintf(buf, sizeof(buf), "URL: %s (%ld bytes; scroll=%d)", s->current_url,
-             s->current_src->len, s->current_scroll);
+  } else {
+    p = 0;
+
+    p += snprintf(&(buf[p]), sizeof(buf) - p, "URL:");
+
+    if (s->current_url != NULL) {
+      p += snprintf(&(buf[p]), sizeof(buf) - p, " %s", s->current_url);
+    } else {
+      p += snprintf(&(buf[p]), sizeof(buf) - p, " (none)");
+    }
+
+    if (s->current_src != NULL) {
+      p += snprintf(&(buf[p]), sizeof(buf) - p, " | %ld bytes", s->current_src->len);
+    }
+
+    p += snprintf(&(buf[p]), sizeof(buf) - p, " | scroll=%d", s->current_scroll);
+
+    if (s->current_node != NULL) {
+      p += snprintf(&(buf[p]), sizeof(buf) - p, " | selected=%s", cmark_node_get_type_string(s->current_node));
+
+      if ((m = wd_node_meta_get(s->current_node)) != NULL) {
+        p += snprintf(&(buf[p]), sizeof(buf) - p, " (%d,%d)",m->x1, m->y1);
+      }
+    }
+
     draw_line_special(0, 0, tb_width(), TB_YELLOW | TB_BOLD, TB_BLUE);
     draw_text_special(0, 0, buf, TB_YELLOW | TB_BOLD, TB_BLUE);
-  } else {
-    draw_line_special(0, 0, tb_width(), TB_YELLOW | TB_BOLD, TB_BLUE);
-    draw_text_special(0, 0, "URL:", TB_YELLOW | TB_BOLD, TB_BLUE);
   }
 
   if (s->current_error != WD_ERROR_NONE) {
@@ -900,8 +1036,8 @@ void wd_render(struct wd_s *s) {
   draw_line_special(0, tb_height() - 1, tb_width(), TB_YELLOW | TB_BOLD,
                     TB_BLUE);
   draw_text_special(0, tb_height() - 1,
-                    "^O=Open ^X=Exit ^R=Refresh ^M=Close Message "
-                    "UP/DOWN/PGUP/PGDN/HOME/END/SPACE=Scroll",
+                    "^O=Open ^X=Exit ^R=Refresh ESC=Close Message "
+                    "UP/DOWN/PGUP/PGDN/HOME/END/SPACE=Scroll [/]=Prev/Next Link ENTER=Activate Link",
                     TB_YELLOW | TB_BOLD, TB_BLUE);
 
   tb_present();
@@ -997,8 +1133,10 @@ exit:
 int main(int argc, char **argv) {
   struct wd_s s;
   struct tb_event ev;
+  char buf[10000];
 
   memset(&s, 0, sizeof(struct wd_s));
+  memset(buf, 0, sizeof(buf));
 
   cmark_gfm_core_extensions_ensure_registered();
 
@@ -1011,7 +1149,17 @@ int main(int argc, char **argv) {
   }
 
   if (argc > 1) {
-    wd_open_url(&s, argv[1]);
+    if (strstr(argv[1], "://") == NULL) {
+      if (strcmp(argv[1], "/") != 0 && strcmp(argv[1], "./") != 0 && strcmp(argv[1], "../") != 0) {
+        snprintf(buf, sizeof(buf), "file://./%s", argv[1]);
+        wd_open_url(&s, buf);
+      } else {
+        snprintf(buf, sizeof(buf), "file://%s", argv[1]);
+        wd_open_url(&s, buf);
+      }
+    } else {
+      wd_open_url(&s, argv[1]);
+    }
   }
 
   while (!s.quit) {

@@ -15,10 +15,12 @@ wd uses a handful of libraries, all of which are readily available.
 
 _Hint: don't bother opening these in `wd`, as they're HTML sites._
 
-1.  [curl](https://curl.haxx.se/) - for fetching documents over http
-2.  [openssl](https://www.openssl.org/) - for the https part of libcurl
-3.  [termbox](https://github.com/nsf/termbox) - for cross-platform terminal support
-4.  [duktape](https://duktape.org/) - for executing javascript
+1.  [cmark-gfm](https://github.com/github/cmark-gfm) - for parsing markdown
+2.  [curl](https://curl.haxx.se/) - for fetching documents over http
+3.  [openssl](https://www.openssl.org/) - for the https part of libcurl
+4.  [termbox](https://github.com/nsf/termbox) - for cross-platform terminal support
+5.  [duktape](https://duktape.org/) - for executing javascript
+6.  [uriparser](https://uriparser.github.io/) - for parsing and manipulating urls
 
 Once you have all those libraries installed, you should just be able to run
 `make`, which will build a `wd` binary for you.
@@ -53,6 +55,14 @@ set_message(
 );
 ```
 
+# Links
+
+Try following these links in `wd`!
+
+- [README (here)](./README.md)
+- [doc1](./doc1.md)
+- [doc2](./doc2.md)
+
 # To-do
 
 I've got quite a bit planned that I'm yet to implement. This list is not in any particular order.
@@ -64,19 +74,3 @@ I've got quite a bit planned that I'm yet to implement. This list is not in any 
   - Event loop for timers in JavaScript
   - DOM-like traversal
 - Nested lists
-
-~strikethrough~
-
-# User Table
-
-| id  | email   | name |
-| --- | ------- | ---- |
-| 1   | 1@a.com | One  |
-| 2   | 2@a.com | Two  |
-
-# Ownership Table
-
-| user_id | item_id |
-| ------- | ------- |
-| 1       | 1       |
-| 2       | 2       |
