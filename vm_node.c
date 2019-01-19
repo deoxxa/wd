@@ -209,7 +209,7 @@ duk_ret_t wd_vm__Node__get__innerText(duk_context *ctx) {
 }
 
 duk_ret_t wd_vm__Node__set__innerText(duk_context *ctx) {
-  cmark_node *node, *child;
+  cmark_node *node, *child, *remove;
   const char *text;
 
   duk_push_this(ctx);
@@ -219,9 +219,12 @@ duk_ret_t wd_vm__Node__set__innerText(duk_context *ctx) {
 
   text = duk_require_string(ctx, 0);
 
-  for (child = cmark_node_first_child(node); child; child = cmark_node_next(child)) {
-    cmark_node_unlink(child);
-    wd_node_free(child);
+  child = cmark_node_first_child(node);
+  while (child != NULL) {
+    remove = child;
+    child = cmark_node_next(remove);
+    cmark_node_unlink(remove);
+    wd_node_free(remove);
   }
 
   child = cmark_node_new(CMARK_NODE_TEXT);
