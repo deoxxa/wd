@@ -69,9 +69,10 @@ struct render_s {
 void render_node_block(cmark_node *node, struct render_s *r);
 void render_node_inline(cmark_node *node, struct render_s *r);
 void render_node_inline_text(const char *word, struct render_s *r);
-void wd_open_url(struct wd_s *s, const char *url);
-void wd_open_url_http(struct wd_s *s, const char *url);
-void wd_open_url_file(struct wd_s *s, const char *url);
+int wd_open(struct wd_s *s, const char *url, struct buf_s *buf);
+int wd_open_url(struct wd_s *s, const char *url);
+int wd_open_url_http(struct wd_s *s, const char *url);
+int wd_open_url_file(struct wd_s *s, const char *url);
 void wd_handle_ev(struct wd_s *s, struct tb_event *ev);
 void wd_handle_ev_always(struct wd_s *s, struct tb_event *ev);
 void wd_handle_ev_mode_normal(struct wd_s *s, struct tb_event *ev);
@@ -564,36 +565,108 @@ void render_node_inline_text(const char *word, struct render_s *r) {
   }
 }
 
-void wd_open_url(struct wd_s *s, const char *url) {
+int wd_open(struct wd_s *s, const char *url, struct buf_s *buf) {
+  int rc;
+  cmark_parser *parser;
+  cmark_node *doc;
+
+  rc = 0;
+  parser = NULL;
+  doc = NULL;
+
+  if ((parser = cmark_parser_new(CMARK_OPT_DEFAULT)) == NULL) {
+    s->current_error = WD_ERROR_FAILED_PARSE;
+    snprintf(s->current_error_message, sizeof(s->current_error_message),
+             "couldn't construct parser");
+    rc = 1;
+    goto cleanup;
+  }
+  cmark_parser_attach_syntax_extension(parser,
+                                       cmark_find_syntax_extension("table"));
+  cmark_parser_feed(parser, buf->buf, buf->len - 1);
+
+  if ((doc = cmark_parser_finish(parser)) == NULL) {
+    s->current_error = WD_ERROR_FAILED_PARSE;
+    snprintf(s->current_error_message, sizeof(s->current_error_message),
+             "failed parsing document");
+    rc = 1;
+    goto cleanup;
+  }
+  cmark_consolidate_text_nodes(doc);
+
+  strncpy(s->current_url, url, sizeof(s->current_url));
+
+  if (s->current_src != NULL) {
+    buf_free(s->current_src);
+    s->current_src = NULL;
+  }
+  s->current_src = buf;
+
+  if (s->current_doc != NULL) {
+    wd_node_free(s->current_doc);
+    s->current_doc = NULL;
+  }
+  s->current_doc = doc;
+
+  if (s->current_vm != NULL) {
+    duk_destroy_heap(s->current_vm);
+    s->current_vm = NULL;
+  }
+
+cleanup:
+  if (buf != NULL && buf != s->current_src) {
+    buf_free(buf);
+    buf = NULL;
+  }
+  if (parser != NULL) {
+    cmark_parser_free(parser);
+    parser = NULL;
+  }
+  if (doc != NULL && doc != s->current_doc) {
+    wd_node_free(doc);
+    doc = NULL;
+  }
+
+  if (rc == 0) {
+    s->current_scroll = 0;
+    s->current_link = 0;
+
+    wd_exec(s);
+  }
+
+  return rc;
+}
+
+int wd_open_url(struct wd_s *s, const char *url) {
+  int rc;
+
+  rc = 0;
+
   if (strncmp(url, "http://", 7) == 0) {
-    wd_open_url_http(s, url);
-    s->current_scroll = 0;
-    wd_exec(s);
+    rc = wd_open_url_http(s, url);
   } else if (strncmp(url, "https://", 8) == 0) {
-    wd_open_url_http(s, url);
-    s->current_scroll = 0;
-    wd_exec(s);
+    rc = wd_open_url_http(s, url);
   } else if (strncmp(url, "file://", 7) == 0) {
-    wd_open_url_file(s, url);
-    s->current_scroll = 0;
-    wd_exec(s);
+    rc = wd_open_url_file(s, url);
   } else {
     s->current_error = WD_ERROR_FAILED_PARSE;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
              "unrecognised url scheme; try https://, http://, or file://");
+
+    rc = 1;
   }
+
+  return rc;
 }
 
-void wd_open_url_http(struct wd_s *s, const char *url) {
+int wd_open_url_http(struct wd_s *s, const char *url) {
+  int rc;
   CURL *ch;
   CURLcode res;
-  cmark_parser *parser;
-  cmark_node *doc;
   struct buf_s *buf;
 
+  rc = 0;
   ch = NULL;
-  parser = NULL;
-  doc = NULL;
   buf = buf_new(1024 * 100);
 
   if ((ch = curl_easy_init()) == NULL) {
@@ -612,77 +685,36 @@ void wd_open_url_http(struct wd_s *s, const char *url) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
              "failed performing request");
+    rc = 1;
     goto cleanup;
   }
 
-  if ((parser = cmark_parser_new(CMARK_OPT_DEFAULT)) == NULL) {
-    s->current_error = WD_ERROR_FAILED_PARSE;
-    snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "couldn't construct parser");
-    goto cleanup;
-  }
-  cmark_parser_attach_syntax_extension(parser,
-                                       cmark_find_syntax_extension("table"));
-  cmark_parser_feed(parser, buf->buf, buf->len - 1);
-
-  if ((doc = cmark_parser_finish(parser)) == NULL) {
-    s->current_error = WD_ERROR_FAILED_PARSE;
-    snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "failed parsing document");
-    goto cleanup;
-  }
-  cmark_consolidate_text_nodes(doc);
-
-  strncpy(s->current_url, url, sizeof(s->current_url));
-
-  if (s->current_src != NULL) {
-    buf_free(s->current_src);
-    s->current_src = NULL;
-  }
-  s->current_src = buf;
-
-  if (s->current_doc != NULL) {
-    wd_node_free(s->current_doc);
-    s->current_doc = NULL;
-  }
-  s->current_doc = doc;
-
-  if (s->current_vm != NULL) {
-    duk_destroy_heap(s->current_vm);
-    s->current_vm = NULL;
-  }
+  rc = wd_open(s, url, buf);
 
 cleanup:
   if (ch != NULL) {
     curl_easy_cleanup(ch);
   }
-  if (buf != NULL && buf != s->current_src) {
-    buf_free(buf);
-  }
-  if (parser != NULL) {
-    cmark_parser_free(parser);
-  }
-  if (doc != NULL && doc != s->current_doc) {
-    wd_node_free(doc);
-  }
+
+  return rc;
 }
 
-void wd_open_url_file(struct wd_s *s, const char *url) {
+int wd_open_url_file(struct wd_s *s, const char *url) {
+  int rc;
   FILE *fd;
-  cmark_parser *parser;
-  cmark_node *doc;
   struct buf_s *buf;
   char b[1024];
   size_t nread;
 
-  parser = NULL;
-  doc = NULL;
+  rc = 0;
+  fd = NULL;
   buf = buf_new(1024 * 100);
 
   if ((fd = fopen(&(url[7]), "r")) == NULL) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
              "failed opening file");
+    rc = 1;
     goto cleanup;
   }
 
@@ -695,63 +727,19 @@ void wd_open_url_file(struct wd_s *s, const char *url) {
     s->current_error = WD_ERROR_UNKNOWN;
     snprintf(s->current_error_message, sizeof(s->current_error_message),
              "failed reading file");
+    rc = 1;
     goto cleanup;
   }
 
-  if ((parser = cmark_parser_new(CMARK_OPT_DEFAULT)) == NULL) {
-    s->current_error = WD_ERROR_FAILED_PARSE;
-    snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "couldn't construct parser");
-    goto cleanup;
-  }
-  cmark_parser_attach_syntax_extension(parser,
-                                       cmark_find_syntax_extension("table"));
-  cmark_parser_feed(parser, buf->buf, buf->len - 1);
-
-  if ((doc = cmark_parser_finish(parser)) == NULL) {
-    s->current_error = WD_ERROR_FAILED_PARSE;
-    snprintf(s->current_error_message, sizeof(s->current_error_message),
-             "failed parsing document");
-    goto cleanup;
-  }
-  cmark_consolidate_text_nodes(doc);
-
-  strncpy(s->current_url, url, sizeof(s->current_url));
-
-  if (s->current_src != NULL) {
-    buf_free(s->current_src);
-    s->current_src = NULL;
-  }
-  s->current_src = buf;
-
-  if (s->current_doc != NULL) {
-    wd_node_free(s->current_doc);
-    s->current_doc = NULL;
-  }
-  s->current_doc = doc;
-
-  if (s->current_vm != NULL) {
-    duk_destroy_heap(s->current_vm);
-    s->current_vm = NULL;
-  }
+  rc = wd_open(s, url, buf);
 
 cleanup:
   if (fd != NULL) {
     fclose(fd);
     fd = NULL;
   }
-  if (buf != NULL && buf != s->current_src) {
-    buf_free(buf);
-    buf = NULL;
-  }
-  if (parser != NULL) {
-    cmark_parser_free(parser);
-    parser = NULL;
-  }
-  if (doc != NULL && doc != s->current_doc) {
-    wd_node_free(doc);
-    doc = NULL;
-  }
+
+  return rc;
 }
 
 void wd_handle_ev(struct wd_s *s, struct tb_event *ev) {
