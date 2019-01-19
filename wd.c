@@ -28,9 +28,6 @@ extern cmark_node_type CMARK_NODE_TABLE, CMARK_NODE_TABLE_ROW,
 // #define MIN(a, b) ((a) < (b) ? (a) : (b))
 // #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-DARRAY_OF(cmark_node*, nodes)
-DARRAY_OF_IMPL(cmark_node*, nodes)
-
 enum wd_mode_e { WD_MODE_NORMAL, WD_MODE_URL };
 
 enum wd_error_e {
