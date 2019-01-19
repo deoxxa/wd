@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <cmark.h>
+#include <cmark-gfm.h>
 
 #include "wd_node_meta.h"
 

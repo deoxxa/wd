@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <cmark.h>
+#include <cmark-gfm.h>
 #include <duktape.h>
 
 #include "buf.h"
@@ -10,11 +10,15 @@
 
 #include "vm_node.h"
 
+void wd_vm__Node__define(duk_context *ctx);
 duk_ret_t wd_vm__Node__constructor(duk_context *ctx);
 duk_ret_t wd_vm__Node__get__type(duk_context *ctx);
 duk_ret_t wd_vm__Node__get__text(duk_context *ctx);
 duk_ret_t wd_vm__Node__set__text(duk_context *ctx);
+duk_ret_t wd_vm__Node__get__parent(duk_context *ctx);
 duk_ret_t wd_vm__Node__get__children(duk_context *ctx);
+duk_ret_t wd_vm__Node__get__nextSibling(duk_context *ctx);
+duk_ret_t wd_vm__Node__get__previousSibling(duk_context *ctx);
 duk_ret_t wd_vm__Node__get__innerText(duk_context *ctx);
 duk_ret_t wd_vm__Node__set__innerText(duk_context *ctx);
 duk_ret_t wd_vm__Node__method__getNodesByType(duk_context *ctx);
@@ -38,8 +42,20 @@ void wd_vm__Node__define(duk_context *ctx) {
   duk_push_c_function(ctx, wd_vm__Node__set__innerText, 1);
   duk_def_prop(ctx, -4, DUK_DEFPROP_HAVE_GETTER | DUK_DEFPROP_HAVE_SETTER);
 
+  duk_push_string(ctx, "parent");
+  duk_push_c_function(ctx, wd_vm__Node__get__parent, 0);
+  duk_def_prop(ctx, -3, DUK_DEFPROP_HAVE_GETTER);
+
   duk_push_string(ctx, "children");
   duk_push_c_function(ctx, wd_vm__Node__get__children, 0);
+  duk_def_prop(ctx, -3, DUK_DEFPROP_HAVE_GETTER);
+
+  duk_push_string(ctx, "nextSibling");
+  duk_push_c_function(ctx, wd_vm__Node__get__nextSibling, 0);
+  duk_def_prop(ctx, -3, DUK_DEFPROP_HAVE_GETTER);
+
+  duk_push_string(ctx, "previousSibling");
+  duk_push_c_function(ctx, wd_vm__Node__get__previousSibling, 0);
   duk_def_prop(ctx, -3, DUK_DEFPROP_HAVE_GETTER);
 
   duk_push_c_function(ctx, wd_vm__Node__method__getNodesByType, 1);
@@ -105,6 +121,25 @@ duk_ret_t wd_vm__Node__set__text(duk_context *ctx) {
   return 1;
 }
 
+duk_ret_t wd_vm__Node__get__parent(duk_context *ctx) {
+  cmark_node *node;
+
+  duk_push_this(ctx);
+  duk_get_prop_string(ctx, -1, "_ptr");
+  node = duk_get_pointer_default(ctx, -1, NULL);
+  duk_pop_2(ctx);
+
+  if ((node = cmark_node_parent(node)) == NULL) {
+    duk_push_undefined(ctx);
+  } else {
+    duk_get_global_string(ctx, "Node");
+    duk_push_pointer(ctx, node);
+    duk_new(ctx, 1);
+  }
+
+  return 1;
+}
+
 duk_ret_t wd_vm__Node__get__children(duk_context *ctx) {
   int i;
   cmark_node *node, *child;
@@ -122,6 +157,44 @@ duk_ret_t wd_vm__Node__get__children(duk_context *ctx) {
     duk_push_pointer(ctx, child);
     duk_new(ctx, 1);
     duk_put_prop_index(ctx, -2, i++);
+  }
+
+  return 1;
+}
+
+duk_ret_t wd_vm__Node__get__nextSibling(duk_context *ctx) {
+  cmark_node *node;
+
+  duk_push_this(ctx);
+  duk_get_prop_string(ctx, -1, "_ptr");
+  node = duk_get_pointer_default(ctx, -1, NULL);
+  duk_pop_2(ctx);
+
+  if ((node = cmark_node_next(node)) == NULL) {
+    duk_push_undefined(ctx);
+  } else {
+    duk_get_global_string(ctx, "Node");
+    duk_push_pointer(ctx, node);
+    duk_new(ctx, 1);
+  }
+
+  return 1;
+}
+
+duk_ret_t wd_vm__Node__get__previousSibling(duk_context *ctx) {
+  cmark_node *node;
+
+  duk_push_this(ctx);
+  duk_get_prop_string(ctx, -1, "_ptr");
+  node = duk_get_pointer_default(ctx, -1, NULL);
+  duk_pop_2(ctx);
+
+  if ((node = cmark_node_previous(node)) == NULL) {
+    duk_push_undefined(ctx);
+  } else {
+    duk_get_global_string(ctx, "Node");
+    duk_push_pointer(ctx, node);
+    duk_new(ctx, 1);
   }
 
   return 1;

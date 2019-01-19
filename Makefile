@@ -1,5 +1,5 @@
 CFLAGS+=-Werror -Wall -pedantic 
-LDLIBS+=-lcmark -lssl -lcurl -ltermbox -lduktape
+LDLIBS+=-lcmark-gfm -lcmark-gfm-extensions -lssl -lcurl -ltermbox -lduktape -lm
 
 wd: wd.o buf.o draw.o vm_node.o wd_node.o wd_node_meta.o
 

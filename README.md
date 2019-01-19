@@ -64,3 +64,19 @@ I've got quite a bit planned that I'm yet to implement. This list is not in any 
   - Event loop for timers in JavaScript
   - DOM-like traversal
 - Nested lists
+
+~strikethrough~
+
+# User Table
+
+| id  | email   | name |
+| --- | ------- | ---- |
+| 1   | 1@a.com | One  |
+| 2   | 2@a.com | Two  |
+
+# Ownership Table
+
+| user_id | item_id |
+| ------- | ------- |
+| 1       | 1       |
+| 2       | 2       |

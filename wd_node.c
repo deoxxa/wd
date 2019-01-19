@@ -1,4 +1,4 @@
-#include <cmark.h>
+#include <cmark-gfm.h>
 
 #include "wd_node.h"
 #include "wd_node_meta.h"
