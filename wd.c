@@ -12,7 +12,6 @@
 
 #include "buf.h"
 #include "draw.h"
-#include "darray.h"
 #include "vm_node.h"
 #include "wd_node.h"
 #include "wd_node_meta.h"
