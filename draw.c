@@ -21,7 +21,7 @@ void draw_line_special(int x, int y, int w, uint16_t fg, uint16_t bg) {
 void draw_text_specialn(int x, int y, const char *str, size_t len, uint16_t fg,
                         uint16_t bg) {
   char c;
-  int i, w;
+  unsigned int i, w;
 
   for (i = 0, w = 0; i < len; i++) {
     c = str[i];

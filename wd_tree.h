@@ -1,4 +1,4 @@
-// #include <cmark-gfm.h>
+/* #include <cmark-gfm.h> */
 
 cmark_node *wd_tree_next(cmark_node *root, cmark_node *curr);
 cmark_node *wd_tree_last(cmark_node *curr);

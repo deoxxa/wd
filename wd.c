@@ -23,9 +23,11 @@
 extern cmark_node_type CMARK_NODE_TABLE, CMARK_NODE_TABLE_ROW,
     CMARK_NODE_TABLE_CELL;
 
-// duktape.h defines these as well
-// #define MIN(a, b) ((a) < (b) ? (a) : (b))
-// #define MAX(a, b) ((a) > (b) ? (a) : (b))
+/* duktape.h defines these as well */
+/*
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+*/
 
 enum wd_mode_e { WD_MODE_NORMAL, WD_MODE_URL };
 
@@ -37,10 +39,10 @@ enum wd_error_e {
 };
 
 struct wd_s {
-  // input mode
+  /* input mode */
   enum wd_mode_e im;
 
-  // current page
+  /* current page */
   char current_url[10000];
   struct buf_s *current_src;
   cmark_node *current_doc;
@@ -51,11 +53,11 @@ struct wd_s {
   int current_scroll;
   cmark_node *current_node;
 
-  // url input
+  /* url input */
   char edit_url[10000];
-  int edit_url_cursor;
+  unsigned int edit_url_cursor;
 
-  // it is what it sounds like
+  /* it is what it sounds like */
   int loading;
   int quit;
 };

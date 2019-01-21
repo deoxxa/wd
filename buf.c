@@ -45,7 +45,7 @@ size_t buf_write_cb(void *data, size_t len, size_t nmemb, void *ptr) {
   rlen = len * nmemb;
   nlen = b->len + rlen;
 
-  // maximum buffer size exceeded
+  /* maximum buffer size exceeded */
   if (b->max != 0 && nlen > b->max) {
     return 0;
   }
