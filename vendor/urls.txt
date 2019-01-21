@@ -1,0 +1,4 @@
+https://duktape.org/duktape-2.3.0.tar.xz
+https://github.com/github/cmark-gfm/archive/0.28.3.gfm.19.tar.gz
+https://github.com/nsf/termbox/archive/v1.1.2.tar.gz
+https://github.com/uriparser/uriparser/releases/download/uriparser-0.9.1/uriparser-0.9.1.tar.bz2

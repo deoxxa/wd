@@ -15,12 +15,18 @@ wd uses a handful of libraries, all of which are readily available.
 
 _Hint: don't bother opening these in `wd`, as they're HTML sites._
 
-1.  [cmark-gfm](https://github.com/github/cmark-gfm) - for parsing markdown
-2.  [curl](https://curl.haxx.se/) - for fetching documents over http
-3.  [openssl](https://www.openssl.org/) - for the https part of libcurl
+1.  [curl](https://curl.haxx.se/) - for fetching documents over http
+2.  [openssl](https://www.openssl.org/) - for the https part of libcurl
+3.  [cmark-gfm](https://github.com/github/cmark-gfm) - for parsing markdown
 4.  [termbox](https://github.com/nsf/termbox) - for cross-platform terminal support
 5.  [duktape](https://duktape.org/) - for executing javascript
 6.  [uriparser](https://uriparser.github.io/) - for parsing and manipulating urls
+
+Optionally, you can skip installing `cmark-gfm`, `termbox`, `duktape`, and
+`uriparser` by running `make wd_vendor=1`, which will build new copies from
+the `vendor` directory. Upsides: less stuff to install. Downsides: the install
+might not be tailored to your system. You might have to adjust some configs to
+make it work.
 
 Once you have all those libraries installed, you should just be able to run
 `make`, which will build a `wd` binary for you.
@@ -46,12 +52,12 @@ display a message at the bottom of your window._
 /*@wd@*/
 
 set_message(
-  "the document object is a `" +
-    document.type +
-    "` node with " +
-    document.children.length +
-    " children! your lucky number is: " +
-    Math.round(Math.random() * 1000)
+	"the document object is a `" +
+		document.type +
+		"` node with " +
+		document.children.length +
+		" children! your lucky number is: " +
+		Math.round(Math.random() * 1000)
 );
 ```
 
