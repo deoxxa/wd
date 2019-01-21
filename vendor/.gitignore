@@ -1,0 +1,3 @@
+/**/*.o
+/**/*.a
+/cmark-gfm/src/config.h
