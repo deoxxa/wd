@@ -52,12 +52,12 @@ display a message at the bottom of your window._
 /*@wd@*/
 
 set_message(
-	"the document object is a `" +
-		document.type +
-		"` node with " +
-		document.children.length +
-		" children! your lucky number is: " +
-		Math.round(Math.random() * 1000)
+  "the document object is a `" +
+    document.type +
+    "` node with " +
+    document.children.length +
+    " children! your lucky number is: " +
+    Math.round(Math.random() * 1000)
 );
 ```
 
