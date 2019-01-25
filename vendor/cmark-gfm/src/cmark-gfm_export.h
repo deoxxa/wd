@@ -1,0 +1,2 @@
+#define CMARK_GFM_EXPORT
+#define CMARK_GFM_NO_EXPORT
